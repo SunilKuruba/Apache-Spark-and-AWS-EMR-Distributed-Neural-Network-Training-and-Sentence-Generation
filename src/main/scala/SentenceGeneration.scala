@@ -1,4 +1,4 @@
-import org.apache.spark.SparkContext
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.rdd.RDD
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration
 import org.deeplearning4j.nn.conf.layers.{DenseLayer, OutputLayer}
@@ -15,9 +15,9 @@ import scala.collection.mutable.ArrayBuffer
 
 class SentenceGeneration extends Serializable {
   val vocabularySize: Int = 1000
-  val embeddingSize: Int = 256
-  val windowSize: Int = 1
-  val batchSize: Int = 32
+  val embeddingSize: Int = 64
+  val windowSize: Int = 5
+  val batchSize: Int = 320
 
   // Tokenizer class for handling text conversion
   class SimpleTokenizer extends Serializable {
@@ -215,7 +215,7 @@ class SentenceGeneration extends Serializable {
 
 // Usage example
 object SimpleLanguageModelExample {
-  def main(args: Array[String]): Unit = {
+  def main2(args: Array[String]): Unit = {
     val sc = new SparkContext("local[*]", "SimpleLanguageModel")
 
     // Sample text data
@@ -238,4 +238,44 @@ object SimpleLanguageModelExample {
 
     sc.stop()
   }
+
+  def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName("SimpleLanguageModel").setMaster("local[*]")
+    val sc = new SparkContext(conf)
+
+    // Define the path to the text file
+    val filePath = "src/main/resources/tiny_input.txt" // Replace with the actual file path
+
+    // Load the text file into an RDD, where each line in the file is a separate RDD element
+    val textRDD = sc.textFile(filePath)
+      .map(_.trim)                         // Trim whitespace
+      .filter(line => line.nonEmpty)       // Remove empty lines
+      .cache()
+
+    // Create and train the model
+    val model = new SentenceGeneration()
+
+    // Assuming 'train' method takes an RDD and the number of epochs as arguments
+    val trainedModel = model.train(sc, textRDD, 1)
+
+    // Correctly initialize and use the tokenizer
+    val tokenizer = new model.SimpleTokenizer()
+    val texts = textRDD.collect() // Collect the RDD to use with the tokenizer
+    tokenizer.fit(texts) // Ensure 'fit' works with collected texts
+
+    // Generate text using the trained model
+    val generatedText = model.generateText(trainedModel, tokenizer, "scientist", 5)
+    println(s"Generated text: $generatedText")
+
+    //      val generatedText2 = model.generateText(
+    //        trainedModel,
+    //        tokenizer,
+    //        seedText = "quick brown fox",
+    //        length = 5,
+    //        temperature = temp
+    //      )
+
+    sc.stop()
+  }
+
 }
