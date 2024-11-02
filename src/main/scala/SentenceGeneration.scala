@@ -198,6 +198,7 @@ class SentenceGeneration extends Serializable {
   }
 
   /// Modified text generation with temperature sampling
+  // Add comment that we are not stopping at sentence end because the model is not so good
   def generateText(model: MultiLayerNetwork, tokenizer: SimpleTokenizer, seedText: String, length: Int, temperature: Double = 0.7): String = {
     var currentSequence = tokenizer.encode(seedText).takeRight(windowSize)
     val generated = new ArrayBuffer[Int]()
@@ -237,7 +238,7 @@ class SentenceGeneration extends Serializable {
 
 // Usage example
 object SimpleLanguageModelExample {
-  def main2(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit = {
     val sc = new SparkContext("local[*]", "SimpleLanguageModel")
 
     // Sample text data
@@ -250,18 +251,18 @@ object SimpleLanguageModelExample {
 
     // Create and train model
     val model = new SentenceGeneration()
-    val trainedModel = model.train(sc, textRDD, 10)
+    val trainedModel = model.train(sc, textRDD, 1)
 
     // Generate text
     val tokenizer = new model.SimpleTokenizer()
     tokenizer.fit(texts)
-    val generatedText = model.generateText(trainedModel, tokenizer, "quick brown fox", 5)
+    val generatedText = model.generateText(trainedModel, tokenizer, "the", 50)
     println(s"Generated text: $generatedText")
 
     sc.stop()
   }
 
-  def main(args: Array[String]): Unit = {
+  def main2(args: Array[String]): Unit = {
     val conf = new SparkConf().setAppName("SimpleLanguageModel").setMaster("local[*]")
     val sc = new SparkContext(conf)
 
