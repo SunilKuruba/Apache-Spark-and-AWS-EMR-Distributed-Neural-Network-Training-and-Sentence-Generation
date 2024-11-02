@@ -5,6 +5,7 @@ import org.deeplearning4j.nn.conf.layers.{DenseLayer, OutputLayer}
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork
 import org.deeplearning4j.nn.weights.WeightInit
 import org.deeplearning4j.optimize.listeners.ScoreIterationListener
+import org.deeplearning4j.util.ModelSerializer
 import org.nd4j.linalg.activations.Activation
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.factory.Nd4j
@@ -136,7 +137,6 @@ class SentenceGeneration extends Serializable {
     model
   }
 
-  // Train the model using Spark RDD
   def train(sc: SparkContext, textRDD: RDD[String], epochs: Int): MultiLayerNetwork = {
     val tokenizer = new SimpleTokenizer()
 
@@ -145,22 +145,24 @@ class SentenceGeneration extends Serializable {
     tokenizer.fit(allTexts)
     val broadcastTokenizer = sc.broadcast(tokenizer)
 
-    // Create and broadcast model
-    val model = buildModel()
-    val broadcastModel = sc.broadcast(model)
+    // Create initial model
+    var model = buildModel()
 
     for (epoch <- 1 to epochs) {
       println(s"Training epoch $epoch")
+
+      // Broadcast current model parameters
+      val broadcastModel = sc.broadcast(model)
 
       // Create training samples using sliding window
       val samplesRDD = textRDD.flatMap { text =>
         val tokens = broadcastTokenizer.value.encode(text)
         createSlidingWindows(tokens)
-      }
+      }.cache() // Cache the samples RDD
 
-      // Process batches
-      samplesRDD.foreachPartition { partition =>
-        val localModel = broadcastModel.value
+      // Process in batches and collect updates
+      val updates = samplesRDD.mapPartitions { partition =>
+        val localModel = broadcastModel.value.clone()
         val batchBuffer = new ArrayBuffer[(Seq[Int], Int)]()
 
         partition.foreach { sample =>
@@ -175,7 +177,27 @@ class SentenceGeneration extends Serializable {
         if (batchBuffer.nonEmpty) {
           processBatch(localModel, batchBuffer.toSeq)
         }
+
+        // Convert parameters to array for easier aggregation
+        val params = localModel.params().dup()
+        Iterator.single(params)
+      }.collect() // Collect all updates
+
+      // Average the parameters
+      if (updates.nonEmpty) {
+        val averagedParams = updates.reduce((p1, p2) => p1.addi(p2))
+        averagedParams.divi(updates.length)
+
+        // Update the main model
+        model.setParams(averagedParams)
       }
+
+      // Clean up broadcast variables
+      broadcastModel.destroy()
+      samplesRDD.unpersist()
+
+      // Optional: Save checkpoint of the model
+      // saveCheckpoint(model, epoch)
     }
 
     model
@@ -238,7 +260,7 @@ class SentenceGeneration extends Serializable {
 
 // Usage example
 object SimpleLanguageModelExample {
-  def main(args: Array[String]): Unit = {
+  def main2(args: Array[String]): Unit = {
     val sc = new SparkContext("local[*]", "SimpleLanguageModel")
 
     // Sample text data
@@ -262,7 +284,7 @@ object SimpleLanguageModelExample {
     sc.stop()
   }
 
-  def main2(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit = {
     val conf = new SparkConf().setAppName("SimpleLanguageModel").setMaster("local[*]")
     val sc = new SparkContext(conf)
 
@@ -279,7 +301,7 @@ object SimpleLanguageModelExample {
     val model = new SentenceGeneration()
 
     // Assuming 'train' method takes an RDD and the number of epochs as arguments
-    val trainedModel = model.train(sc, textRDD, 20)
+    val trainedModel = model.train(sc, textRDD, 2)
 
     // Correctly initialize and use the tokenizer
     val tokenizer = new model.SimpleTokenizer()
