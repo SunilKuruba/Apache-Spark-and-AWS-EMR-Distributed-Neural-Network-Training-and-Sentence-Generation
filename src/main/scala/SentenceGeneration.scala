@@ -9,15 +9,17 @@ import org.nd4j.linalg.activations.Activation
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.factory.Nd4j
 import org.nd4j.linalg.learning.config.Adam
+import org.nd4j.linalg.lossfunctions.LossFunctions
 import org.nd4j.linalg.ops.transforms.Transforms
 
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 class SentenceGeneration extends Serializable {
   val vocabularySize: Int = 1000
   val embeddingSize: Int = 64
-  val windowSize: Int = 5
-  val batchSize: Int = 320
+  val windowSize: Int = 1
+  val batchSize: Int = 32
 
   // Tokenizer class for handling text conversion
   class SimpleTokenizer extends Serializable {
@@ -40,7 +42,7 @@ class SentenceGeneration extends Serializable {
     }
 
     def decode(indices: Seq[Int]): String = {
-      indices.map(idx => indexToWord.getOrElse(idx, "<UNK>")).mkString(" ")
+      indices.map(idx => indexToWord.getOrElse(idx, "")).mkString(" ")
     }
   }
 
@@ -101,10 +103,10 @@ class SentenceGeneration extends Serializable {
     attendedOutput.reshape(batchSize, sequenceLength, embedSize)
   }
 
-  // Build neural network model
+  // Improved neural network model
   def buildModel(): MultiLayerNetwork = {
     val conf = new NeuralNetConfiguration.Builder()
-      .seed(123)
+      .seed(42)
       .updater(new Adam(0.001))
       .weightInit(WeightInit.XAVIER)
       .list()
@@ -112,22 +114,25 @@ class SentenceGeneration extends Serializable {
         .nIn(embeddingSize * windowSize)
         .nOut(512)
         .activation(Activation.RELU)
+        .dropOut(0.2)  // Added dropout for regularization
         .build())
       .layer(1, new DenseLayer.Builder()
         .nIn(512)
         .nOut(256)
         .activation(Activation.RELU)
+        .dropOut(0.2)
         .build())
       .layer(2, new OutputLayer.Builder()
         .nIn(256)
         .nOut(vocabularySize)
         .activation(Activation.SOFTMAX)
+        .lossFunction(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD)
         .build())
       .build()
 
     val model = new MultiLayerNetwork(conf)
     model.init()
-    model.setListeners(new ScoreIterationListener(100))
+    model.setListeners(new ScoreIterationListener(10))  // More frequent updates
     model
   }
 
@@ -192,10 +197,28 @@ class SentenceGeneration extends Serializable {
     model.fit(inputArray, labelsArray)
   }
 
-  // Generate text using the trained model
-  def generateText(model: MultiLayerNetwork, tokenizer: SimpleTokenizer, seedText: String, length: Int): String = {
+  /// Modified text generation with temperature sampling
+  def generateText(model: MultiLayerNetwork, tokenizer: SimpleTokenizer, seedText: String, length: Int, temperature: Double = 0.7): String = {
     var currentSequence = tokenizer.encode(seedText).takeRight(windowSize)
     val generated = new ArrayBuffer[Int]()
+    val rand = new Random()
+
+    def sampleWithTemperature(logits: INDArray, temp: Double): Int = {
+      val scaled = logits.div(temp)
+      val expScaled = Transforms.exp(scaled)
+      val probs = expScaled.div(expScaled.sum(1))
+
+      // Convert to probabilities and sample
+      val probArray = Array.ofDim[Double](probs.columns())
+      for (i <- 0 until probs.columns()) {
+        probArray(i) = probs.getDouble(Long.box(i))
+      }
+
+      // Sample using cumulative probabilities
+      val cumSum = probArray.scanLeft(0.0)(_ + _).tail
+      val sample = rand.nextDouble()
+      cumSum.zipWithIndex.find(_._1 >= sample).map(_._2).getOrElse(0)
+    }
 
     for (_ <- 1 to length) {
       val embedding = createEmbeddingMatrix(currentSequence)
@@ -203,15 +226,14 @@ class SentenceGeneration extends Serializable {
       val flattenedAttention = attentionOutput.reshape(1, embeddingSize * windowSize)
 
       val output = model.output(flattenedAttention)
-      val nextTokenIndex = Nd4j.argMax(output, 1).getInt(0)
+      val nextTokenIndex = sampleWithTemperature(output, temperature)
 
       generated += nextTokenIndex
       currentSequence = (currentSequence.tail :+ nextTokenIndex).takeRight(windowSize)
     }
 
     tokenizer.decode(generated)
-  }
-}
+  }}
 
 // Usage example
 object SimpleLanguageModelExample {
@@ -256,7 +278,7 @@ object SimpleLanguageModelExample {
     val model = new SentenceGeneration()
 
     // Assuming 'train' method takes an RDD and the number of epochs as arguments
-    val trainedModel = model.train(sc, textRDD, 1)
+    val trainedModel = model.train(sc, textRDD, 20)
 
     // Correctly initialize and use the tokenizer
     val tokenizer = new model.SimpleTokenizer()
@@ -264,16 +286,9 @@ object SimpleLanguageModelExample {
     tokenizer.fit(texts) // Ensure 'fit' works with collected texts
 
     // Generate text using the trained model
-    val generatedText = model.generateText(trainedModel, tokenizer, "scientist", 5)
-    println(s"Generated text: $generatedText")
-
-    //      val generatedText2 = model.generateText(
-    //        trainedModel,
-    //        tokenizer,
-    //        seedText = "quick brown fox",
-    //        length = 5,
-    //        temperature = temp
-    //      )
+    val generatedText = model.generateText(trainedModel, tokenizer, "scientist", 50)
+    val cleanedText = generatedText.replaceAll("\\s+", " ")
+    println(s"Generated text: $cleanedText")
 
     sc.stop()
   }
