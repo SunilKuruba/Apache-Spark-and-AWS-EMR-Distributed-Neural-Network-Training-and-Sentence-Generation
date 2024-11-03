@@ -15,6 +15,9 @@ lazy val root = project
 
       "org.deeplearning4j" % "deeplearning4j-core" % "1.0.0-M1.1",
       "org.nd4j" % "nd4j-native-platform" % "1.0.0-M1.1",
+      "org.apache.hadoop" % "hadoop-aws" % "3.3.1",
+      "org.deeplearning4j" %% "dl4j-spark" % "1.0.0-M2.1",
+      "org.deeplearning4j" %% "dl4j-spark-parameterserver" % "1.0.0-M2.1",
 
       "org.scala-lang.modules" %% "scala-collection-compat" % "2.8.1",
       "com.knuddels" % "jtokkit" % "1.1.0",

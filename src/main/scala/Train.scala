@@ -3,6 +3,7 @@ import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import org.deeplearning4j.datasets.iterator.impl.ListDataSetIterator
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork
+import org.deeplearning4j.spark.impl.paramavg.ParameterAveragingTrainingMaster
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.dataset.DataSet
 import org.nd4j.linalg.dataset.api.iterator.DataSetIterator
@@ -58,8 +59,8 @@ class Train extends Serializable {
   /**
    * Trains the neural network model using the provided RDD and configuration.
    */
-  def train(sc: SparkContext, textRDD: RDD[String], metricsWriter: BufferedWriter, epochs: Int): MultiLayerNetwork = {
-    logger.info("Starting training process.")
+  def train(sc: SparkContext, textRDD: RDD[String], metricsWriter: BufferedWriter, epochs: Int, trainingMaster: ParameterAveragingTrainingMaster): MultiLayerNetwork = {
+    logger.info("Starting training process."+ trainingMaster.getTrainingStats.statsAsString())
     val tokenizer = new Tokenizer()
     val allTexts = textRDD.collect()
     tokenizer.fit(allTexts)

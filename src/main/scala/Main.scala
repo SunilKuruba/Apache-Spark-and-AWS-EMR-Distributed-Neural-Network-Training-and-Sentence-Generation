@@ -3,6 +3,7 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.slf4j.LoggerFactory
+import org.deeplearning4j.spark.impl.paramavg.ParameterAveragingTrainingMaster
 
 import java.io.{BufferedWriter, File, FileWriter, IOException}
 
@@ -54,7 +55,13 @@ object Main {
       logger.info(s"Total number of lines: ${textRDD.count()}")
 
       // Train the model
-      val trainedModel = new Train().train(sparkContext, textRDD, metricsWriter, 1)
+      val trainingMaster: ParameterAveragingTrainingMaster = new ParameterAveragingTrainingMaster.Builder(32)
+        .batchSizePerWorker(32)
+        .averagingFrequency(5)
+        .workerPrefetchNumBatches(2)
+        .build()
+
+      val trainedModel = new Train().train(sparkContext, textRDD, metricsWriter, 1, trainingMaster)
       logger.info("Model training completed.")
 
       // Generate sample text using the trained model
@@ -63,10 +70,10 @@ object Main {
       tokenizer.fit(texts)
       logger.info("Tokenizer fitted on the text data.")
 
-      val startToken = "ocean"
-      val generatedText = new TextOutput().generateText(trainedModel, tokenizer, startToken, numOfOutputPredictions)
+      val seedToken = "The little cat"
+      val generatedText = new TextOutput().generateText(trainedModel, tokenizer, seedToken, numOfOutputPredictions)
       val cleanedText = generatedText.replaceAll("\\s+", " ")
-      writeToFile(s"Generated text: $startToken -> $cleanedText", outputResultFilePath)
+      writeToFile(s"Generated text: $seedToken -> $cleanedText", outputResultFilePath)
 
     } catch {
       case e: IOException =>

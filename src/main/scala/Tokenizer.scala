@@ -9,7 +9,7 @@ class Tokenizer extends Serializable {
 
   // Maps to store word-index and index-word relationships
   // Given that the tokenizer runs for a short time, it is okay to have var(s) here
-  private var wordToIndex = Map[String, Int]()
+  var wordToIndex = Map[String, Int]()
   private var indexToWord = Map[Int, String]()
   private var currentIdx = 0
 

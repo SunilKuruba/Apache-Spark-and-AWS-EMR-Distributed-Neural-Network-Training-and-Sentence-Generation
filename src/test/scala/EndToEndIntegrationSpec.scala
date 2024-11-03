@@ -32,4 +32,11 @@ class EndToEndIntegrationSpec extends AnyFlatSpec with Matchers {
       sc.stop()
     }
   }
+
+  "End-to-end program" should "work with param args" in {
+    val inputPath = "src/test/resources/input/tiny_input.txt"
+    val outputResultPath = "src/test/resources/output/output_result.txt"
+    val outputStatsPath = "src/test/resources/output/output_statstics.csv"
+    Main.main(Array(inputPath, outputResultPath, outputStatsPath))
+  }
 }
