@@ -16,7 +16,7 @@ import org.nd4j.linalg.schedule.{ExponentialSchedule, ScheduleType}
 
 import java.io.{ByteArrayInputStream, ObjectInputStream, ObjectOutputStream}
 
-class LLMModel extends Serializable{
+class NNModel extends Serializable{
   val vocabularySize: Int = 3000
   val embeddingSize: Int = 32
   val windowSize: Int = 1

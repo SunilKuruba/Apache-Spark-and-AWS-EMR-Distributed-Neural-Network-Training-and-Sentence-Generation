@@ -32,7 +32,7 @@ class TextOutput {
     }
 
     for (_ <- 1 to length) {
-      val embedding = new LLMModel().createEmbeddingMatrix(currentSequence)
+      val embedding = new NNModel().createEmbeddingMatrix(currentSequence)
       val attentionOutput = new Train().selfAttention(embedding)
       val flattenedAttention = attentionOutput.reshape(1, embeddingSize * windowSize)
 

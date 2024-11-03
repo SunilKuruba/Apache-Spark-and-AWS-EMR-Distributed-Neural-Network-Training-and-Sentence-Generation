@@ -1,3 +1,4 @@
+import com.typesafe.config.ConfigFactory
 import org.apache.spark.{SparkConf, SparkContext}
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork
 import org.nd4j.linalg.api.ndarray.INDArray
@@ -5,14 +6,29 @@ import org.nd4j.linalg.api.ndarray.INDArray
 import java.io.{BufferedWriter, FileWriter}
 
 object Main {
+  /**
+   * Enumeration representing the different environments in which the job can run.
+   * Available environments are:
+   * - `prod`: Production environment.
+   * - `local`: Local development environment.
+   * - `test`: Testing environment.
+   */
+  sealed trait Environment
+  object Environment {
+    case object prod extends Environment
+    case object local extends Environment
+    case object test extends Environment
+  }
+
+  /** The environment in which the job is currently running. Defaults to `local`. */
+  var environment: Environment = Environment.local
+
   def main(args: Array[String]): Unit = {
+    val config = ConfigFactory.load
     val sparkContext = new SparkContext(getSparkConf)
-
-    //  val metricsFilePath = "s3://hw2-spark-llm/output/"
-    val metricsFilePath = "src/main/resources/training_metrics.csv"
-    val inputFilePath = "src/main/resources/tiny_input.txt"
-
-    val metricsWriter = new BufferedWriter(new FileWriter(metricsFilePath))
+    val inputFilePath = config.getString("io.inputdir."+environment)
+    val outputFilePath = config.getString("io.outputdir."+environment)
+    val metricsWriter = new BufferedWriter(new FileWriter(outputFilePath))
     metricsWriter.write("Epoch,\tLearningRate,\tLoss,\tAccuracy,\tBatchesProcessed,\tPredictionsMade,\tEpochDuration,\tNumber of partitions,\tNumber Of Lines, \tMemoryUsed\n")
 
     try {

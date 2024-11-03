@@ -17,7 +17,7 @@ class Train extends Serializable{
   val embeddingSize: Int = 32
   val windowSize: Int = 1
   val batchSize: Int = 16
-  private val modelClass = new LLMModel()
+  private val modelClass = new NNModel()
 
   def selfAttention(input: INDArray): INDArray = {
     val Array(batchSize, sequenceLength, embedSize) = input.shape()
