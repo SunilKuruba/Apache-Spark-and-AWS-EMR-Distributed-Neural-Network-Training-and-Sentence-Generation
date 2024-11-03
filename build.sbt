@@ -21,7 +21,9 @@ lazy val root = project
       "com.typesafe" % "config" % "1.4.3",
 
       "org.apache.mrunit" % "mrunit" % "1.1.0" % Test classifier "hadoop2",
-      "org.scalameta" %% "munit" % "1.0.0" % Test
+      "org.scalameta" %% "munit" % "1.0.0" % Test,
+      "org.scalatest" %% "scalatest" % "3.2.15" % Test,
+      "org.mockito" %% "mockito-scala" % "1.17.12" % Test
     ),
     assembly / assemblyMergeStrategy := {
       case PathList("META-INF", xs @ _*) =>

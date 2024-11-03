@@ -1,3 +1,4 @@
+import com.typesafe.config.ConfigFactory
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import org.deeplearning4j.datasets.iterator.impl.ListDataSetIterator
@@ -8,170 +9,173 @@ import org.nd4j.linalg.dataset.api.iterator.DataSetIterator
 import org.nd4j.linalg.factory.Nd4j
 import org.nd4j.linalg.learning.config.Adam
 import org.nd4j.linalg.ops.transforms.Transforms
+import org.slf4j.LoggerFactory
 
 import java.io.BufferedWriter
-import scala.jdk.CollectionConverters.seqAsJavaListConverter
 
-class Train extends Serializable{
-  val vocabularySize: Int = 3000
-  val embeddingSize: Int = 32
-  val windowSize: Int = 1
-  val batchSize: Int = 16
+/**
+ * The Train class handles the training of a neural network using Spark.
+ * It uses a self-attention mechanism for embeddings and handles distributed training.
+ */
+class Train extends Serializable {
+  private val logger = LoggerFactory.getLogger(classOf[Train])
+  private val config = ConfigFactory.load()
+
+  // Configuration parameters from the config file
+  private val vocabularySize: Int = config.getInt("model.vocabularySize")
+  private val embeddingSize: Int = config.getInt("model.embeddingSize")
+  private val windowSize: Int = config.getInt("model.windowSize")
+  private val batchSize: Int = config.getInt("model.batchSize")
   private val modelClass = new NNModel()
 
+  /**
+   * Applies a self-attention mechanism to the input tensor.
+   */
   def selfAttention(input: INDArray): INDArray = {
+    logger.debug("Applying self-attention to input tensor.")
     val Array(batchSize, sequenceLength, embedSize) = input.shape()
 
-    // Create query, key, and value matrices for each batch independently
     val query = Nd4j.createUninitialized(batchSize, sequenceLength, embedSize)
     val key = Nd4j.createUninitialized(batchSize, sequenceLength, embedSize)
     val value = Nd4j.createUninitialized(batchSize, sequenceLength, embedSize)
 
-    // Ensure query, key, and value are initialized properly
-    if (query.isEmpty || key.isEmpty || value.isEmpty) {
-      return Nd4j.empty()
-    }
-
-    // Compute the dot product between queries and keys
     val scores = query
       .tensorAlongDimension(0, 1, 2)
       .mmul(key.tensorAlongDimension(0, 1, 2).transpose())
       .div(math.sqrt(embedSize))
 
-    // Apply softmax along the last dimension to get attention weights
     val attentionWeights = Transforms.softmax(scores)
+    logger.debug("Calculated attention weights.")
 
-    // Multiply the weights with the values
     val attendedOutput = attentionWeights
       .tensorAlongDimension(0, 1, 2)
       .mmul(value.tensorAlongDimension(0, 1, 2))
 
+    logger.debug("Generated attended output tensor.")
     attendedOutput.reshape(batchSize, sequenceLength, embedSize)
   }
 
-  // Modify the train method to use serialization
+  /**
+   * Trains the neural network model using the provided RDD and configuration.
+   */
   def train(sc: SparkContext, textRDD: RDD[String], metricsWriter: BufferedWriter, epochs: Int): MultiLayerNetwork = {
+    logger.info("Starting training process.")
     val tokenizer = new Tokenizer()
     val allTexts = textRDD.collect()
     tokenizer.fit(allTexts)
     val broadcastTokenizer = sc.broadcast(tokenizer)
 
-    // Split textRDD into training and validation sets
     val Array(trainingDataRDD, validationDataRDD) = textRDD.randomSplit(Array(0.8, 0.2))
+    logger.info("Split data into training and validation sets.")
 
-    // Generate validation DataSetIterator
     val validationDataSetIterator = createValidationDataSetIterator(validationDataRDD, tokenizer)
+    val initialModel = modelClass.buildModel(validationDataSetIterator)
 
-    val model = modelClass.buildModel(validationDataSetIterator)
-    var currentModelBytes = modelClass.serializeModel(model)
-    var broadcastModel = sc.broadcast(currentModelBytes)
+    val finalModel = (1 to epochs).foldLeft(initialModel) { (currentModel, epoch) =>
+      trainEpoch(sc, trainingDataRDD, currentModel, broadcastTokenizer, epoch, epochs, metricsWriter)
+    }
 
+    metricsWriter.close()
+    finalModel
+  }
+
+  /**
+   * Trains a single epoch and returns the updated model.
+   */
+  private def trainEpoch(
+                          sc: SparkContext,
+                          trainingDataRDD: RDD[String],
+                          model: MultiLayerNetwork,
+                          broadcastTokenizer: org.apache.spark.broadcast.Broadcast[Tokenizer],
+                          epoch: Int,
+                          totalEpochs: Int,
+                          metricsWriter: BufferedWriter
+                        ): MultiLayerNetwork = {
+    val epochStartTime = System.currentTimeMillis()
+    logger.info(s"Starting epoch $epoch.")
+
+    val learningRate = model.getLayerWiseConfigurations.getConf(0).getLayer
+      .asInstanceOf[org.deeplearning4j.nn.conf.layers.BaseLayer]
+      .getIUpdater.asInstanceOf[Adam].getLearningRate(epoch, totalEpochs)
+    logger.info(s"Effective learning rate for epoch $epoch: $learningRate")
+
+    // Accumulators for metrics
     val batchProcessedAcc = sc.longAccumulator("batchesProcessed")
     val totalLossAcc = sc.doubleAccumulator("totalLoss")
     val correctPredictionsAcc = sc.longAccumulator("correctPredictions")
     val totalPredictionsAcc = sc.longAccumulator("totalPredictions")
 
-    for (epoch <- 1 to epochs) {
-      val epochStartTime = System.currentTimeMillis()
-      println(s"Starting epoch $epoch")
+    val broadcastModel = sc.broadcast(modelClass.serializeModel(model))
 
-      // Retrieve and print the learning rate from the optimizer (Adam)
-      val learningRate = model.getLayerWiseConfigurations.getConf(0).getLayer
-        .asInstanceOf[org.deeplearning4j.nn.conf.layers.BaseLayer]
-        .getIUpdater.asInstanceOf[Adam].getLearningRate(epoch, epochs) // Pass the current epoch to get effective rate
-      println(s"Effective learning rate for epoch $epoch: $learningRate")
+    val samplesRDD = trainingDataRDD
+      .flatMap(text => modelClass.createSlidingWindows(broadcastTokenizer.value.encode(text)))
+      .persist()
 
-      batchProcessedAcc.reset()
-      totalLossAcc.reset()
-      correctPredictionsAcc.reset()
-      totalPredictionsAcc.reset()
+    val processedRDD = samplesRDD.mapPartitions { partition =>
+      val localModel = modelClass.deserializeModel(broadcastModel.value)
 
-      val samplesRDD = trainingDataRDD.flatMap { text =>
-        val tokens = broadcastTokenizer.value.encode(text)
-        modelClass.createSlidingWindows(tokens)
-      }.persist()
-
-      val processedRDD = samplesRDD.mapPartitions { partition =>
-        val localModel = modelClass. deserializeModel(broadcastModel.value)
-        val batchBuffer = new scala.collection.mutable.ArrayBuffer[(Seq[Int], Int)]()
-        var localLoss = 0.0
-        var localCorrect = 0L
-        var localTotal = 0L
-
-        partition.foreach { sample =>
-          batchBuffer += sample
-          if (batchBuffer.size >= batchSize) {
-            val (loss, correct, total) = processBatch(localModel, batchBuffer.toSeq)
-            localLoss += loss
-            localCorrect += correct
-            localTotal += total
-            batchBuffer.clear()
-            batchProcessedAcc.add(1)
-          }
-        }
-
-        if (batchBuffer.nonEmpty) {
-          val (loss, correct, total) = processBatch(localModel, batchBuffer.toSeq)
-          localLoss += loss
-          localCorrect += correct
-          localTotal += total
+      partition
+        .grouped(batchSize)
+        .map { batch =>
+          val (loss, correct, total) = processBatch(localModel, batch)
+          totalLossAcc.add(loss)
+          correctPredictionsAcc.add(correct)
+          totalPredictionsAcc.add(total)
           batchProcessedAcc.add(1)
+          modelClass.serializeModel(localModel)
         }
-
-        totalLossAcc.add(localLoss)
-        correctPredictionsAcc.add(localCorrect)
-        totalPredictionsAcc.add(localTotal)
-
-        Iterator.single(modelClass.serializeModel(localModel))
-      }
-
-      val updatedModels = processedRDD.collect()
-      if (updatedModels.nonEmpty) {
-        val averagedModel = if (updatedModels.length > 1) {
-          val models = updatedModels.map(modelClass.deserializeModel)
-          averageModels(models)
-        } else {
-          modelClass.deserializeModel(updatedModels(0))
-        }
-
-        broadcastModel.destroy()
-        currentModelBytes = modelClass.serializeModel(averagedModel)
-        broadcastModel = sc.broadcast(currentModelBytes)
-
-        val epochDuration = System.currentTimeMillis() - epochStartTime
-        val avgLoss = totalLossAcc.value / batchProcessedAcc.value
-        val accuracy = if (totalPredictionsAcc.value > 0) {
-          correctPredictionsAcc.value.toDouble / totalPredictionsAcc.value
-        } else 0.0
-
-        println(f"""
-                   |Epoch $epoch Statistics:
-                   |Duration: ${epochDuration}ms
-                   |Average Loss: $avgLoss%.4f
-                   |Accuracy: ${accuracy * 100}%.2f%%
-                   |Batches Processed: ${batchProcessedAcc.value}
-                   |Predictions Made: ${totalPredictionsAcc.value}
-                   |Memory Used: ${Runtime.getRuntime.totalMemory() - Runtime.getRuntime.freeMemory()}B
-      """.stripMargin)
-        // Differentiating between executor memory and driver memory.
-        val executorMemoryStatus = sc.getExecutorMemoryStatus.map { case (executor, (maxMemory, remainingMemory)) =>
-          s"$executor: Max Memory = $maxMemory, Remaining Memory = $remainingMemory"
-        }
-        println(s"Executor Memory Status:\n${executorMemoryStatus.mkString("\n")}")
-        // Write metrics to the CSV file
-        metricsWriter.write(f"$epoch,$learningRate%.6f,$avgLoss%.4f,${accuracy * 100}%.2f,${batchProcessedAcc.value},${totalPredictionsAcc.value},$epochDuration,${textRDD.getNumPartitions},${textRDD.count()},,${executorMemoryStatus.mkString("\n")}\n")
-      }
-
-      samplesRDD.unpersist()
-      val epochEndTime = System.currentTimeMillis()
-      println(s"Time per Epoch: ${epochEndTime - epochStartTime} ms")
     }
-    // Close the writer after all epochs are done
-    metricsWriter.close()
-    modelClass.deserializeModel(broadcastModel.value)
+
+    val updatedModels = processedRDD.collect()
+    val newModel = if (updatedModels.nonEmpty) {
+      val averagedModel = if (updatedModels.length > 1) {
+        averageModels(updatedModels.map(modelClass.deserializeModel))
+      } else {
+        modelClass.deserializeModel(updatedModels.head)
+      }
+
+      logEpochMetrics(
+        epoch,
+        epochStartTime,
+        learningRate,
+        totalLossAcc.value,
+        batchProcessedAcc.value,
+        correctPredictionsAcc.value,
+        totalPredictionsAcc.value,
+        metricsWriter
+      )
+
+      averagedModel
+    } else {
+      model
+    }
+
+    broadcastModel.destroy()
+    samplesRDD.unpersist()
+    newModel
   }
 
+  /**
+   * Processes a batch of training data and updates the model.
+   */
   private def processBatch(model: MultiLayerNetwork, batch: Seq[(Seq[Int], Int)]): (Double, Long, Long) = {
+    logger.debug("Processing a batch of data.")
+    val (inputArray, labelsArray) = createBatchArrays(batch)
+    val batchDataSet = new DataSet(inputArray, labelsArray)
+
+    val loss = model.score(batchDataSet)
+    model.fit(batchDataSet)
+
+    val predictions = model.predict(inputArray).toSeq
+    val correctPredictions = predictions.zipWithIndex.count { case (pred, idx) => pred == batch(idx)._2 }
+
+    (loss, correctPredictions, predictions.length)
+  }
+
+  /**
+   * Creates input and label arrays for a batch.
+   */
+  private def createBatchArrays(batch: Seq[(Seq[Int], Int)]): (INDArray, INDArray) = {
     val inputArray = Nd4j.zeros(batch.size, embeddingSize * windowSize)
     val labelsArray = Nd4j.zeros(batch.size, vocabularySize)
 
@@ -185,56 +189,72 @@ class Train extends Serializable{
       }
     }
 
-    // Train on batch
-    model.fit(inputArray, labelsArray)
-
-    // Calculate metrics
-    val output = model.output(inputArray)
-    val predictions = Nd4j.argMax(output, 1)
-    val labels = Nd4j.argMax(labelsArray, 1)
-    // Calculate the number of correct predictions
-    val correct = predictions.eq(labels).castTo(org.nd4j.linalg.api.buffer.DataType.INT32)
-      .sumNumber().longValue()
-
-    (model.score(), correct, batch.size)
+    (inputArray, labelsArray)
   }
 
-  private def averageModels(models: Array[MultiLayerNetwork]): MultiLayerNetwork = {
-    val firstModel = models(0)
-    if (models.length == 1) return firstModel
+  /**
+   * Averages the parameters of multiple models.
+   */
+  private def averageModels(models: Seq[MultiLayerNetwork]): MultiLayerNetwork = {
+    logger.debug("Averaging parameters of multiple models.")
+    val masterModel = models.head
+    val avgParams = models
+      .map(_.params())
+      .reduce((a, b) => a.add(b))
+      .div(models.length)
 
-    val params = models.map(_.params())
-    val avgParams = params.reduce((a, b) => a.add(b)).div(models.length)
-
-    val result = new MultiLayerNetwork(firstModel.getLayerWiseConfigurations)
+    val result = new MultiLayerNetwork(masterModel.getLayerWiseConfigurations)
     result.init()
     result.setParams(avgParams)
     result
   }
 
-  def createValidationDataSetIterator(validationDataRDD: RDD[String], tokenizer: Tokenizer): DataSetIterator = {
-    // Process the validation data to create features and labels
-    val validationData = validationDataRDD.flatMap { text =>
-      val tokens = tokenizer.encode(text)
-      modelClass.createSlidingWindows(tokens).map { case (inputSeq, label) =>
-        val inputArray = Nd4j.zeros(1, embeddingSize * windowSize)
-        val labelArray = Nd4j.zeros(1, vocabularySize)
+  /**
+   * Logs metrics for an epoch.
+   */
+  private def logEpochMetrics(
+                               epoch: Int,
+                               epochStartTime: Long,
+                               learningRate: Double,
+                               totalLoss: Double,
+                               batchesProcessed: Long,
+                               correctPredictions: Long,
+                               totalPredictions: Long,
+                               metricsWriter: BufferedWriter
+                             ): Unit = {
+    val epochDuration = System.currentTimeMillis() - epochStartTime
+    val avgLoss = totalLoss / batchesProcessed
+    val accuracy = if (totalPredictions > 0) {
+      correctPredictions.toDouble / totalPredictions
+    } else 0.0
 
-        // Convert input sequence and label to ND4J arrays
-        val embedding = modelClass.createEmbeddingMatrix(inputSeq)
-        val attentionOutput = selfAttention(embedding)
-        if (!attentionOutput.isEmpty) {
-          val flattenedAttention = attentionOutput.reshape(1, embeddingSize * windowSize)
-          inputArray.putRow(0, flattenedAttention)
-          labelArray.putScalar(Array(0, label), 1.0)
+    logger.info(
+      f"Epoch $epoch statistics: Duration: ${epochDuration}ms, " +
+        f"Average Loss: $avgLoss%.4f, " +
+        f"Accuracy: ${accuracy * 100}%.2f%%, " +
+        f"Batches Processed: $batchesProcessed, " +
+        f"Predictions Made: $totalPredictions"
+    )
 
-          new DataSet(inputArray, labelArray)
-        }
-        new DataSet()
-      }
-    }.collect().toList.asJava
+    metricsWriter.write(
+      f"$epoch,$learningRate%.6f,$avgLoss%.4f,${accuracy * 100}%.2f,$batchesProcessed,$totalPredictions,$epochDuration\n"
+    )
+  }
 
-    // Create a ListDataSetIterator with a batch size of 1 (or adjust as needed)
-    new ListDataSetIterator(validationData, batchSize)
+  /**
+   * Creates a validation DataSetIterator.
+   */
+  private def createValidationDataSetIterator(
+                                               validationDataRDD: RDD[String],
+                                               tokenizer: Tokenizer
+                                             ): DataSetIterator = {
+    logger.debug("Creating validation DataSetIterator.")
+    val samples = validationDataRDD
+      .flatMap(text => modelClass.createSlidingWindows(tokenizer.encode(text)))
+      .collect()
+
+    val (inputArray, labelsArray) = createBatchArrays(samples)
+    val validationDataSet = new DataSet(inputArray, labelsArray)
+    new ListDataSetIterator(validationDataSet.asList(), batchSize)
   }
 }
