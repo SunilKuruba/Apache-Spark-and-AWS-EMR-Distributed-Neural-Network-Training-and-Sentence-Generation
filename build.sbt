@@ -23,8 +23,18 @@ lazy val root = project
       "org.apache.mrunit" % "mrunit" % "1.1.0" % Test classifier "hadoop2",
       "org.scalameta" %% "munit" % "1.0.0" % Test
     ),
-    assemblyMergeStrategy in assembly := {
-      case PathList("META-INF", xs @ _*) => MergeStrategy.discard
-      case x => MergeStrategy.first
+    assembly / assemblyMergeStrategy := {
+      case PathList("META-INF", xs @ _*) =>
+        xs match {
+          case "MANIFEST.MF" :: Nil =>   MergeStrategy.discard
+          case "services" ::_       =>   MergeStrategy.concat
+          case _                    =>   MergeStrategy.discard
+        }
+      case "reference.conf"  => MergeStrategy.concat
+      case x if x.endsWith(".proto") => MergeStrategy.rename
+      case x if x.contains("hadoop") => MergeStrategy.first
+      case  _ => MergeStrategy.first
     }
   )
+
+resolvers += "Conjars Repo" at "https://conjars.org/repo"
