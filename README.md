@@ -89,7 +89,7 @@ This project showcases a scalable training pipeline for a neural network leverag
 - Prepare input text files under `src/main/resources/input/` or upload them to an accessible location in S3 input folder.
 
 ### 4. Run the Training
-- Train the model by running the `Train` module
+Create an EMR cluster and add a step function by attaching the uploaded jar from S3 file
 
 ## Testing
 Run the tests using SBT:
@@ -98,5 +98,5 @@ sbt test
 ```
 
 ## Results
-After training, the model should generate coherent sentences from a seed input, showcasing text generation capabilities similar to GPT models.
+After training, the model should generate coherent sentences from a seed input, showcasing text generation capabilities similar to GPT models. You can find the statistics and generated sentence output folder in the S3 /output path,
 ```
