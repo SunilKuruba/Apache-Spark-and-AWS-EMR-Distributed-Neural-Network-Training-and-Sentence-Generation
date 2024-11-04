@@ -119,9 +119,6 @@ object Main extends Serializable{
     new SparkConf()
       .setAppName("Sunil's Spark LLM")
       .setMaster("local[*]")
-//      .set("spark.hadoop.fs.s3a.access.key", "AKIA2YICAFRJ5F2N3DEC") // AKIA2YICAFRJ5F2N3DEC
-//      .set("spark.hadoop.fs.s3a.secret.key", "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") // uA1f2bCyeNtlByzCFyWurhMVzRarG3z9HiCMtcAv
-//      .set("spark.hadoop.fs.s3a.endpoint", "s3.us-east-2.amazonaws.com") // Change if using a different region
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .registerKryoClasses(Array(
         classOf[MultiLayerNetwork],

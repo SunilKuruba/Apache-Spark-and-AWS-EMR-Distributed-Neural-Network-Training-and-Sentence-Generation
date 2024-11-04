@@ -30,8 +30,8 @@ class NNModel extends Serializable {
   private val embeddingSize: Int = config.getInt("model.embeddingSize")
   private val windowSize: Int = config.getInt("model.windowSize")
   private val seed: Int = config.getInt("model.seed")
-  private val initialValue: Double = config.getDouble("model.initialValue")
   private val gamma: Double = config.getDouble("model.gamma")
+  private val initialValue: Double = config.getDouble("model.initialValue")
   private val layerSize: Int = config.getInt("model.layerSize")
   private val dropOut: Double = config.getDouble("model.dropOut")
 
