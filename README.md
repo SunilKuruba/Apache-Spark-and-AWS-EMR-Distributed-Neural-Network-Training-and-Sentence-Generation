@@ -5,7 +5,7 @@
 **Email**: skuru@uic.edu <br />
 **Instructor**: Mark Grechanik
 
-Youtube video - TBD
+Youtube video - https://www.youtube.com/watch?v=dTjj6qQInEw
 
 ## Description
 This project showcases a scalable training pipeline for a neural network leveraging Apache Spark for distributed data processing and deep learning capabilities. The `Train` class is designed for comprehensive model training with built-in support for self-attention mechanisms, enhancing the embedding process for better model performance. Key aspects include reading configurations, handling data preprocessing with Spark RDDs, and training over multiple epochs with detailed metric tracking. The self-attention implementation computes query, key, and value matrices to enrich the representation learning phase. The main execution logic, contained in the `Main` object, sets up the environment, manages data input from local or cloud-based sources like S3, and writes results and training metrics. Integration with DL4J (`MultiLayerNetwork`, `ParameterAveragingTrainingMaster`) and ND4J (`INDArray`, `Transforms`) facilitates model configuration and parameter optimization, allowing for seamless execution in distributed settings. The code demonstrates an efficient blend of Spark-based parallelism with deep learning, making it suitable for large-scale NLP and machine learning tasks.
