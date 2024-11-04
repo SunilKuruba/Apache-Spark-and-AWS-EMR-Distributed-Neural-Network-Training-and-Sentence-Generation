@@ -1,4 +1,4 @@
-# Hadoop-LLM-AWS-EMR: Large-Scale Text Processing and Embeddings
+# Spark-LLM-AWS-EMR: Distributed Neural Network Training and Sentence Prediction
 
 **Author**: Sunil Kuruba <br />
 **UIN**: 659375633 <br />
@@ -8,13 +8,7 @@
 Youtube video - TBD
 
 ## Description
-This project involves training a language model (LLM) using Apache Spark on AWS EMR. The model architecture is inspired by ChatGPT, employing a neural network with 3 layers. It leverages a tokenizer, a sliding window approach, and generates both positional and vector embeddings. The objective is to take a seed input, such as "the cat," and generate a complete sentence based on the model's training.
-
-# CS 441 Spark LLM Project
-
-## Description
-This project is designed for training a language model (LLM) using Apache Spark on AWS EMR. The model architecture is similar to ChatGPT, featuring a 3-layer neural network. The project includes modules for tokenizing input data, creating embeddings, and generating text output. The model aims to generate complete sentences when given a seed input, such as "the cat."
-
+This project showcases a scalable training pipeline for a neural network leveraging Apache Spark for distributed data processing and deep learning capabilities. The `Train` class is designed for comprehensive model training with built-in support for self-attention mechanisms, enhancing the embedding process for better model performance. Key aspects include reading configurations, handling data preprocessing with Spark RDDs, and training over multiple epochs with detailed metric tracking. The self-attention implementation computes query, key, and value matrices to enrich the representation learning phase. The main execution logic, contained in the `Main` object, sets up the environment, manages data input from local or cloud-based sources like S3, and writes results and training metrics. Integration with DL4J (`MultiLayerNetwork`, `ParameterAveragingTrainingMaster`) and ND4J (`INDArray`, `Transforms`) facilitates model configuration and parameter optimization, allowing for seamless execution in distributed settings. The code demonstrates an efficient blend of Spark-based parallelism with deep learning, making it suitable for large-scale NLP and machine learning tasks.
 ## Project Structure
 
 ```bash
