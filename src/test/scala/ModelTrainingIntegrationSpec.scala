@@ -2,11 +2,9 @@ import Main.Environment
 import org.apache.spark.{SparkConf, SparkContext}
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork
 import org.deeplearning4j.spark.impl.paramavg.ParameterAveragingTrainingMaster
-import org.scalatest.Ignore
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-@Ignore
 class ModelTrainingIntegrationSpec extends AnyFlatSpec with Matchers {
   Main.environment = Environment.test;
 
