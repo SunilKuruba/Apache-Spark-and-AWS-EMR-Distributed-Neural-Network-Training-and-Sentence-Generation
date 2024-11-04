@@ -1,11 +1,10 @@
+import org.deeplearning4j.datasets.iterator.utilty.ListDataSetIterator
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork
+import org.nd4j.linalg.dataset.DataSet
 import org.nd4j.linalg.factory.Nd4j
 
 object TestUtility {
    def createDummyDataIterator() = {
-    import org.deeplearning4j.datasets.iterator.impl.ListDataSetIterator
-    import org.nd4j.linalg.dataset.DataSet
-
      val features = Nd4j.create(10, 100)
      val labels = Nd4j.create(10, 50)
     val dataSet = new DataSet(features, labels)

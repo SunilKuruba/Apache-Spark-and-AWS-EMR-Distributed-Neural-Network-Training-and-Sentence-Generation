@@ -1,7 +1,10 @@
+import Main.Environment
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class TokenizerSpec extends AnyFlatSpec with Matchers {
+  Main.environment = Environment.test;
+
   "Tokenizer" should "correctly fit and encode text" in {
     val tokenizer = new Tokenizer()
     val texts = Seq("hello world", "world hello", "test text")

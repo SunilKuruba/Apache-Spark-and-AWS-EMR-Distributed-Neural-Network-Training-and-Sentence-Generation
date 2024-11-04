@@ -1,7 +1,7 @@
 import com.typesafe.config.ConfigFactory
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
-import org.deeplearning4j.datasets.iterator.impl.ListDataSetIterator
+import org.deeplearning4j.datasets.iterator.utilty.ListDataSetIterator
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork
 import org.deeplearning4j.spark.impl.paramavg.ParameterAveragingTrainingMaster
 import org.nd4j.linalg.api.ndarray.INDArray
@@ -59,8 +59,8 @@ class Train extends Serializable {
   /**
    * Trains the neural network model using the provided RDD and configuration.
    */
-  def train(sc: SparkContext, textRDD: RDD[String], metricsWriter: BufferedWriter, epochs: Int, trainingMaster: ParameterAveragingTrainingMaster): MultiLayerNetwork = {
-    logger.info("Starting training process."+ trainingMaster.getTrainingStats.statsAsString())
+  def train(sc: SparkContext, textRDD: RDD[String], metricsWriter: FileSystem, epochs: Int, trainingMaster: ParameterAveragingTrainingMaster): MultiLayerNetwork = {
+    logger.info("Starting training process."+ trainingMaster.toString)
     val tokenizer = new Tokenizer()
     val allTexts = textRDD.collect()
     tokenizer.fit(allTexts)
@@ -90,7 +90,7 @@ class Train extends Serializable {
                           broadcastTokenizer: org.apache.spark.broadcast.Broadcast[Tokenizer],
                           epoch: Int,
                           totalEpochs: Int,
-                          metricsWriter: BufferedWriter
+                          metricsWriter: FileSystem
                         ): MultiLayerNetwork = {
     val epochStartTime = System.currentTimeMillis()
     logger.info(s"Starting epoch $epoch.")
@@ -134,6 +134,9 @@ class Train extends Serializable {
       } else {
         modelClass.deserializeModel(updatedModels.head)
       }
+      val executorMemoryStatus = sc.getExecutorMemoryStatus.map { case (executor, (maxMemory, remainingMemory)) =>
+        s"$executor: Max Memory = $maxMemory, Remaining Memory = $remainingMemory"
+      }
 
       logEpochMetrics(
         epoch,
@@ -143,7 +146,9 @@ class Train extends Serializable {
         batchProcessedAcc.value,
         correctPredictionsAcc.value,
         totalPredictionsAcc.value,
-        metricsWriter
+        metricsWriter,
+        processedRDD,
+        executorMemoryStatus.head
       )
 
       averagedModel
@@ -221,7 +226,9 @@ class Train extends Serializable {
                                batchesProcessed: Long,
                                correctPredictions: Long,
                                totalPredictions: Long,
-                               metricsWriter: BufferedWriter
+                               metricsWriter: FileSystem,
+                               textRDD: RDD[Array[Byte]],
+                               executorMemoryStatus: String
                              ): Unit = {
     val epochDuration = System.currentTimeMillis() - epochStartTime
     val avgLoss = totalLoss / batchesProcessed
@@ -237,9 +244,9 @@ class Train extends Serializable {
         f"Predictions Made: $totalPredictions"
     )
 
-    metricsWriter.write(
-      f"$epoch,$learningRate%.6f,$avgLoss%.4f,${accuracy * 100}%.2f,$batchesProcessed,$totalPredictions,$epochDuration\n"
-    )
+    val metrics = f"$epoch, $learningRate%.6f, $avgLoss%.4f, ${accuracy * 100}%.2f, ${batchesProcessed}, " +
+      f"${totalPredictions}, $epochDuration, ${textRDD.getNumPartitions}, ${textRDD.count()}, ${executorMemoryStatus}\n"
+    metricsWriter.write(metrics)
   }
 
   /**

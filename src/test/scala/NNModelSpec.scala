@@ -1,8 +1,11 @@
+import Main.Environment
 import com.typesafe.config.ConfigFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class NNModelSpec extends AnyFlatSpec with Matchers {
+  Main.environment = Environment.test;
+
   "NNModel" should "create embedding matrix with correct dimensions" in {
     val model = new NNModel()
     val sequence = Seq(1)

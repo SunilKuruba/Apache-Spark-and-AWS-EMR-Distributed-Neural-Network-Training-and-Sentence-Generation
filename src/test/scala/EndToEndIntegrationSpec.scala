@@ -1,8 +1,12 @@
+import Main.Environment
 import org.apache.spark.{SparkConf, SparkContext}
+import org.deeplearning4j.spark.impl.paramavg.ParameterAveragingTrainingMaster
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class EndToEndIntegrationSpec extends AnyFlatSpec with Matchers {
+  Main.environment = Environment.test;
+
   "End-to-end text generation" should "work with trained model" in {
     val sc = new SparkContext(new SparkConf().setMaster("local[2]").setAppName("test"))
     try {
@@ -13,12 +17,18 @@ class EndToEndIntegrationSpec extends AnyFlatSpec with Matchers {
         "the lazy fox sleeps while the dog jumps"
       ))
 
-      val train = new Train()
-      val metricsWriter = new java.io.BufferedWriter(
-        new java.io.FileWriter("src/test/resources/output/e2e-metrics.csv")
-      )
+      val outputStatsFilePath = "src/test/resources/output/e2e-metrics.csv";
+      val metricsWriter = new LocalFileSystem(outputStatsFilePath)
 
-      val model = train.train(sc, textRDD, metricsWriter, 1)
+      // Train the model
+      val trainingMaster: ParameterAveragingTrainingMaster = new ParameterAveragingTrainingMaster.Builder(32)
+        .batchSizePerWorker(32)
+        .averagingFrequency(5)
+        .workerPrefetchNumBatches(2)
+        .build()
+
+      val train = new Train()
+      val model = train.train(sc, textRDD, metricsWriter, 1, trainingMaster)
 
       // Text generation phase
       val tokenizer = new Tokenizer()
@@ -34,9 +44,10 @@ class EndToEndIntegrationSpec extends AnyFlatSpec with Matchers {
   }
 
   "End-to-end program" should "work with param args" in {
+    val seedToken = "new world"
     val inputPath = "src/test/resources/input/tiny_input.txt"
     val outputResultPath = "src/test/resources/output/output_result.txt"
     val outputStatsPath = "src/test/resources/output/output_statstics.csv"
-    Main.main(Array(inputPath, outputResultPath, outputStatsPath))
+    Main.main(Array(seedToken,inputPath, outputResultPath, outputStatsPath))
   }
 }

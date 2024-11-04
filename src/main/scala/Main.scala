@@ -1,11 +1,12 @@
 import com.typesafe.config.ConfigFactory
 import org.apache.spark.{SparkConf, SparkContext}
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork
+import org.deeplearning4j.spark.impl.paramavg.ParameterAveragingTrainingMaster
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.slf4j.LoggerFactory
-import org.deeplearning4j.spark.impl.paramavg.ParameterAveragingTrainingMaster
 
-import java.io.{BufferedWriter, File, FileWriter, IOException}
+import java.io.IOException
+import java.time.Instant
 
 object Main {
   private val logger = LoggerFactory.getLogger(this.getClass)
@@ -18,37 +19,64 @@ object Main {
    * - `test`: Testing environment.
    */
   sealed trait Environment
-  private object Environment {
+   object Environment {
     case object prod extends Environment
     case object local extends Environment
     case object test extends Environment
   }
 
   /** The environment in which the job is currently running. Defaults to `local`. */
-  var environment: Environment = Environment.local
+  var environment: Environment = Environment.prod
 
   def main(args: Array[String]): Unit = {
     // Load configuration settings
     val config = ConfigFactory.load()
     val sparkContext = new SparkContext(getSparkConf)
     val numOfOutputPredictions = config.getInt("model.numOfOutputPredictions")
+    val instant = Instant.now().toString
+
+    val seedToken  =  if (args.length > 0) args(0) else "The little cat"
 
     // Determine input and output file paths based on command line arguments or configuration
-    val inputFilePath = if (args.length > 0) args(0) else config.getString(s"io.inputdir.$environment")
-    val outputResultFilePath = if (args.length > 1) args(1) else config.getString(s"io.outputResult.$environment")
-    val outputStatsFilePath = if (args.length > 2) args(2) else config.getString(s"io.outputStats.$environment")
+    val inputFilePath = if (args.length > 1) args(1) else config.getString(s"io.inputdir.$environment")
+    val outputResultFilePath = if (args.length > 1) args(2) else config.getString(s"io.outputResult.$environment")
+    val outputStatsFilePath = if (args.length > 1) args(3) else config.getString(s"io.outputStats.$environment")
+
+    val inputData: String = if (inputFilePath.startsWith("s3")) {
+      environment = Environment.prod
+      val s3InputFileSystem = new S3FileSystem(sparkContext, inputFilePath)
+      s3InputFileSystem.read()
+    } else {
+      val localInputFileSystem = new LocalFileSystem(inputFilePath)
+      localInputFileSystem.read()
+    }
+
+    val resultFile: FileSystem = if (inputFilePath.startsWith("s3")) {
+      val s3ResultFile = new S3FileSystem(sparkContext, outputResultFilePath.replace("{instant}", instant))
+      s3ResultFile.create()
+      s3ResultFile
+    } else {
+      val localResultFile = new LocalFileSystem(outputResultFilePath.replace("{instant}", instant))
+      localResultFile.create()
+      localResultFile
+    }
+
+    val statsFile: FileSystem = if (inputFilePath.startsWith("s3")) {
+      val s3StatsFile = new S3FileSystem(sparkContext, outputStatsFilePath.replace("{instant}", instant))
+      s3StatsFile
+    } else {
+      val localStatsFile = new LocalFileSystem(outputStatsFilePath.replace("{instant}", instant))
+      localStatsFile.create()
+      localStatsFile
+    }
 
     // Initialize the metrics writer for logging training metrics
-    val metricsWriter = new BufferedWriter(new FileWriter(outputStatsFilePath))
     try {
-      metricsWriter.write("Epoch,\tLearningRate,\tLoss,\tAccuracy,\tBatchesProcessed," +
+      statsFile.write("Epoch,\tLearningRate,\tLoss,\tAccuracy,\tBatchesProcessed," +
         "\tPredictionsMade,\tEpochDuration,\tNumber of partitions,\tNumber Of Lines,\tMemoryUsed\n")
 
       // Read input text and preprocess
-      val textRDD = sparkContext.textFile(inputFilePath)
-        .map(_.trim)
-        .filter(_.nonEmpty)
-        .cache()
+      val textRDD = sparkContext.parallelize(inputData.split("\n"))
 
       // Log initial statistics
       logger.info(s"Number of partitions: ${textRDD.getNumPartitions}")
@@ -61,7 +89,7 @@ object Main {
         .workerPrefetchNumBatches(2)
         .build()
 
-      val trainedModel = new Train().train(sparkContext, textRDD, metricsWriter, 1, trainingMaster)
+      val trainedModel = new Train().train(sparkContext, textRDD, statsFile, 1, trainingMaster)
       logger.info("Model training completed.")
 
       // Generate sample text using the trained model
@@ -70,16 +98,16 @@ object Main {
       tokenizer.fit(texts)
       logger.info("Tokenizer fitted on the text data.")
 
-      val seedToken = "The little cat"
       val generatedText = new TextOutput().generateText(trainedModel, tokenizer, seedToken, numOfOutputPredictions)
       val cleanedText = generatedText.replaceAll("\\s+", " ")
-      writeToFile(s"Generated text: $seedToken -> $cleanedText", outputResultFilePath)
+      resultFile.write(s"Generated text: $seedToken -> $cleanedText")
 
     } catch {
       case e: IOException =>
         logger.error("Error occurred while writing metrics or reading input data.", e)
     } finally {
-      metricsWriter.close()
+      statsFile.close()
+      resultFile.close()
       sparkContext.stop()
       logger.info("SparkContext stopped successfully.")
     }
@@ -89,6 +117,9 @@ object Main {
     new SparkConf()
       .setAppName("Sunil's Spark LLM")
       .setMaster("local[*]")
+//      .set("spark.hadoop.fs.s3a.access.key", "AKIA2YICAFRJ5F2N3DEC") // AKIA2YICAFRJ5F2N3DEC
+//      .set("spark.hadoop.fs.s3a.secret.key", "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") // uA1f2bCyeNtlByzCFyWurhMVzRarG3z9HiCMtcAv
+//      .set("spark.hadoop.fs.s3a.endpoint", "s3.us-east-2.amazonaws.com") // Change if using a different region
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .registerKryoClasses(Array(
         classOf[MultiLayerNetwork],
@@ -96,23 +127,6 @@ object Main {
         classOf[Array[Byte]],
         classOf[org.nd4j.linalg.api.buffer.DataBuffer]
       ))
-  }
 
-  /**
-   * Utility method to write log messages to a file.
-   * @param message The message to write to the file.
-   * @param filePath The path to the file where the message will be written.
-   */
-  private def writeToFile(message: String, filePath: String): Unit = {
-    val file = new File(filePath)
-    val writer = new BufferedWriter(new FileWriter(file))
-    try {
-      writer.write(message)
-    } catch {
-      case e: IOException =>
-        logger.error("Error occurred while writing the log message to the file.", e)
-    } finally {
-      writer.close()
-    }
   }
 }
