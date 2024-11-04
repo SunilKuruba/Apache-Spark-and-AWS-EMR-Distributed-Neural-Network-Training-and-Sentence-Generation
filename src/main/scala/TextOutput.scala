@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory
 /**
  * Class responsible for generating text from a trained neural network model.
  */
-class TextOutput {
+class TextOutput extends Serializable{
   private val logger = LoggerFactory.getLogger(classOf[TextOutput])
 
   /**

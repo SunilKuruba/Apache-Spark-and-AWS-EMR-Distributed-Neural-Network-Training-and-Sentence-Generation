@@ -12,8 +12,6 @@ import org.nd4j.linalg.learning.config.Adam
 import org.nd4j.linalg.ops.transforms.Transforms
 import org.slf4j.LoggerFactory
 
-import java.io.BufferedWriter
-
 /**
  * The Train class handles the training of a neural network using Spark.
  * It uses a self-attention mechanism for embeddings and handles distributed training.

@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.time.Instant
 
-object Main {
+object Main extends Serializable{
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   /**
@@ -33,6 +33,7 @@ object Main {
     val config = ConfigFactory.load()
     val sparkContext = new SparkContext(getSparkConf)
     val numOfOutputPredictions = config.getInt("model.numOfOutputPredictions")
+    val numOfEpoch = config.getInt("model.numOfEpoch")
     val instant = Instant.now().toString
 
     val seedToken  =  if (args.length > 0) args(0) else "The little cat"
@@ -89,7 +90,7 @@ object Main {
         .workerPrefetchNumBatches(2)
         .build()
 
-      val trainedModel = new Train().train(sparkContext, textRDD, statsFile, 1, trainingMaster)
+      val trainedModel = new Train().train(sparkContext, textRDD, statsFile, numOfEpoch, trainingMaster)
       logger.info("Model training completed.")
 
       // Generate sample text using the trained model
@@ -101,6 +102,7 @@ object Main {
       val generatedText = new TextOutput().generateText(trainedModel, tokenizer, seedToken, numOfOutputPredictions)
       val cleanedText = generatedText.replaceAll("\\s+", " ")
       resultFile.write(s"Generated text: $seedToken -> $cleanedText")
+      logger.info(s"Results are found in /output/$instant")
 
     } catch {
       case e: IOException =>
@@ -127,6 +129,5 @@ object Main {
         classOf[Array[Byte]],
         classOf[org.nd4j.linalg.api.buffer.DataBuffer]
       ))
-
   }
 }

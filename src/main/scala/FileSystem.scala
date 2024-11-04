@@ -1,21 +1,67 @@
 import org.apache.spark.SparkContext
+import org.slf4j.LoggerFactory
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
 
-// Define a trait representing a generic file system interface
-trait FileSystem {
-  // Method to create a new file or setup file-related resources
+/**
+ * A trait representing a generic file system interface.
+ *
+ * This trait provides a contract for file system operations, including
+ * creating, reading, writing, and closing files. Any concrete implementation
+ * of this trait should provide the actual logic for these operations.
+ *
+ * This trait extends Serializable to ensure that implementations can be
+ * serialized, which is often required for distributed systems or saving
+ * state across sessions.
+ */
+trait FileSystem extends Serializable {
+
+  /**
+   * Creates a new file or sets up necessary resources for file-related operations.
+   *
+   * Implementations should define how a file is created or initialized,
+   * including any pre-requisites or configurations required for file access.
+   */
   def create(): Unit
 
-  // Method to read the content from a file and return it as a String
+  /**
+   * Reads the content from a file and returns it as a String.
+   *
+   * This method should handle the process of opening the file, reading its
+   * content, and returning the data in a String format. Implementations should
+   * consider error handling for scenarios where the file may not exist or
+   * is not readable.
+   *
+   * @return The content of the file as a String.
+   * @throws IOException If there is an error reading the file.
+   */
   def read(): String
 
-  // Method to write data to a file
+  /**
+   * Writes data to a file.
+   *
+   * This method accepts a String input and should handle the logic for
+   * writing that data to the file. Implementations should ensure that
+   * the file is properly opened for writing and that any existing content
+   * is handled according to the desired behavior (e.g., overwrite or append).
+   *
+   * @param data The data to be written to the file.
+   * @throws IOException If there is an error writing to the file.
+   */
   def write(data: String): Unit
 
-  // Method to close any open resources or finalize writing operations
+  /**
+   * Closes any open resources or finalizes writing operations.
+   *
+   * This method should be called to release any resources associated with
+   * the file operations, such as closing file handles or flushing buffers.
+   * Implementations should ensure that all resources are cleaned up properly
+   * to prevent memory leaks.
+   */
   def close(): Unit
 }
+
 
 // Implement a file system that works with the local file system
 class LocalFileSystem(path: String) extends FileSystem {
@@ -59,6 +105,7 @@ class LocalFileSystem(path: String) extends FileSystem {
 class S3FileSystem(sparkContext: SparkContext, path: String) extends FileSystem {
   // StringBuilder to accumulate data to be written to the S3 path
   private val stringBuilder = new StringBuilder()
+  private val logger = LoggerFactory.getLogger(this.getClass)
 
   /**
    * Creates an empty file in the S3 path using Spark.
@@ -89,6 +136,11 @@ class S3FileSystem(sparkContext: SparkContext, path: String) extends FileSystem 
    * The data is parallelized and saved as a text file.
    */
   override def close(): Unit = {
-    sparkContext.parallelize(Seq(stringBuilder.toString())).coalesce(1).saveAsTextFile(path)
+    try {
+      sparkContext.parallelize(Seq(stringBuilder.toString())).coalesce(1).saveAsTextFile(path)
+    }catch {
+      case e: Exception =>
+        logger.error("Error occurred while writing metrics or reading input data.", e)
+    }
   }
 }
