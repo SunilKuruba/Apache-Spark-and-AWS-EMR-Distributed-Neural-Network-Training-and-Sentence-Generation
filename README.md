@@ -1,4 +1,4 @@
-# Spark-LLM-AWS-EMR: Distributed Neural Network Training and Sentence Generation
+# Apache Spark and AWS-EMR: Distributed Neural Network Training and Sentence Generation
 
 **Author**: Sunil Kuruba <br />
 **Instructor**: Mark Grechanik <br />
